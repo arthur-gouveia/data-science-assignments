@@ -7,25 +7,17 @@
 #pollutant: A string ("sulfate" or "nitrate")                                                           #
 #id:        A numeric vector with the monitors ids of interest                                          #
 #                                                                                                       #
-#Iterates through a list of files and saves the pollutant means in a vector that is returned            #
+#Reads all the selected files through lapply and rbinds them with do.call                               #
 #########################################################################################################
 
 pollutantmean <- function(directory, pollutant, id = 1:332) {
-        #Initializes the variables
-        monitor_data <- data.frame()                    #The data from the monitor output file
-        pollutantmeans <- vector(mode = "numeric")      #The vector that will contain the poluttant mean
-        files <- list.files(directory, full.names = TRUE)[id]
+        #reads the column classes from the 1st 500 rows of the 1st file. Used to optimize the read.csv
+        classes <- sapply(read.csv(list.files(directory, full.names = TRUE)[1], nrows = 500), class)
         
-        #reads the column classes from a sample of the first file. Used to optimize the read.csv 
-        class_initialization <- read.csv(files[1], nrows = 500)
-        classes <- sapply(class_initialization, class)
-        
-        #Iterating through the file list
-        for (f in files) {
-                #reads the file and calculates the pollutant mean ignoring the NAs 
-                monitor_data <- rbind(monitor_data, read.csv(f, comment.char = "", colClasses = classes))
-        }
-        #Returns the pollutantmeans
+        #lapplies the filelist subset to a read.csv and then do.calls rbind on the result list 
+        monitor_data <- do.call(rbind, lapply(list.files(directory, full.names = TRUE)[id],read.csv, comment.char = "", colClasses = classes))
+
+        #Returns the pollutant mean
         mean(monitor_data[[pollutant]], na.rm = TRUE)
 }
 
@@ -39,25 +31,17 @@ pollutantmean <- function(directory, pollutant, id = 1:332) {
 #directory: A string containing the directory where the output files can be found                       #
 #id:        A numeric vector with the file ids of interest                                              #
 #                                                                                                       #
-#Iterates through a list of files and counts the number of complete cases in each file                  #
-#Returns a data frame containing the file id, file name, nobs (num of observations)                     #
+#Sapplies an annonymous function to the list of files. This functions counts the number of valid        #
+#observations on each file. Then returns a data frame containing the file id, file name and nobs        #
 #########################################################################################################
 
 complete <- function(directory, id = 1:332) {
-        #files contains the full path filenames and file2 contais only the filenames
+        #the list of selected files
         files <- list.files(directory, full.names = TRUE)[id]
-        files2 <- list.files(directory)[id]
+        #selected files number of valid observations
+        nobs <- sapply(files, function(x) sum(complete.cases(read.csv(x))), USE.NAMES = FALSE)
         #The I function doesn`t convert the string to a factor when initializing the data frame
-        nobs <- data.frame(0,I("Str"),0)
-
-        #loops through the list of files
-        for (i in seq_along(id)) {
-                nobs[i,1] <- id[i] #inserts the file ID
-                nobs[i,2] <- files2[i] #inserts the file name
-                nobs[i,3] <- sum(complete.cases(read.csv(files[i]))) #Inserts the number of valid observations
-        }
-        names(nobs) <- c("ID", "File Name", "N Obs") #Sets the name of the data frame
-        nobs #ane returns it
+        data.frame("id" = id, "file" = I(list.files(directory)[id]),"nobs" = nobs)
 }
 
 
@@ -80,14 +64,12 @@ complete <- function(directory, id = 1:332) {
 corr <- function(directory, threshold = 0) {
         cr <- vector("numeric")
         ccases <- complete(directory)
-        ccases <- ccases[ccases$"N Obs" > threshold,]
+        ccases <- ccases[ccases$"nobs" > threshold,]
         
         if (nrow(ccases) > 0) {
-                files <- paste(directory, ccases$"File Name", sep = "/")
-                for (i in 1:length(files)) {
-                        data <- read.csv(files[i])
-                        cr[i] <- cor(data$sulfate, data$nitrate, use = "complete.obs")
-                }
+                files <- paste(directory, ccases$"file", sep = "/")
+                data <- lapply(files, read.csv)
+                cr <- sapply(data, function(x) cor(x$sulfate, x$nitrate, use = "complete.obs"), USE.NAMES = F)
         }
         cr
 }
